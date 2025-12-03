@@ -1,30 +1,61 @@
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 
-// Game state
+// =============================================================================
+// CONFIGURATION
+// =============================================================================
+const CONFIG = {
+    // Movement settings - smoother and slower
+    movement: {
+        acceleration: 8,        // Reduced from 25
+        friction: 0.92,         // Increased friction for smoother stops
+        maxSpeed: 12,           // Cap max speed
+        gravity: 15,            // Slightly reduced gravity
+        jumpForce: 6,           // Reduced jump force
+        smoothing: 0.15         // Lerp factor for smooth movement
+    },
+    // Collectibles
+    totalCollectibles: 16,
+    collectRadius: 2.5,
+    // Visual
+    fogDensity: 0.012,
+    snowflakeCount: 2500
+};
+
+// =============================================================================
+// GAME STATE
+// =============================================================================
 const state = {
     score: 0,
+    totalCollectibles: CONFIG.totalCollectibles,
     velocity: new THREE.Vector3(),
+    targetVelocity: new THREE.Vector3(),
     direction: new THREE.Vector3(),
     moveForward: false,
     moveBackward: false,
     moveLeft: false,
     moveRight: false,
-    canJump: false,
+    canJump: true,
     currentLocation: '',
+    gameWon: false,
+    winAnimationProgress: 0,
+    // Object pools
     collectibles: [],
     skaters: [],
     snowflakes: [],
-    lights: []
+    lights: [],
+    floatingLights: []
 };
 
-// Scene setup
+// =============================================================================
+// SCENE SETUP
+// =============================================================================
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x1a1a2e);
-scene.fog = new THREE.FogExp2(0x1a1a2e, 0.015);
+scene.background = new THREE.Color(0x0a0a1a);
+scene.fog = new THREE.FogExp2(0x0a0a1a, CONFIG.fogDensity);
 
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.set(0, 2, 30);
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 2, 35);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -32,14 +63,16 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.0;
 document.getElementById('game-container').appendChild(renderer.domElement);
 
 // Controls
 const controls = new PointerLockControls(camera, document.body);
 
 document.addEventListener('click', () => {
-    controls.lock();
+    if (!state.gameWon) {
+        controls.lock();
+    }
 });
 
 controls.addEventListener('lock', () => {
@@ -50,84 +83,153 @@ controls.addEventListener('unlock', () => {
     document.getElementById('instructions').style.opacity = '1';
 });
 
-// Lighting
-const ambientLight = new THREE.AmbientLight(0x4a4a6a, 0.4);
-scene.add(ambientLight);
+// =============================================================================
+// LIGHTING SETUP - Enhanced for magical feel
+// =============================================================================
+function setupLighting() {
+    // Ambient - soft blue night
+    const ambientLight = new THREE.AmbientLight(0x2a2a4a, 0.5);
+    scene.add(ambientLight);
 
-const moonLight = new THREE.DirectionalLight(0x9999ff, 0.3);
-moonLight.position.set(-50, 100, -50);
-moonLight.castShadow = true;
-moonLight.shadow.mapSize.width = 2048;
-moonLight.shadow.mapSize.height = 2048;
-moonLight.shadow.camera.near = 0.5;
-moonLight.shadow.camera.far = 500;
-moonLight.shadow.camera.left = -100;
-moonLight.shadow.camera.right = 100;
-moonLight.shadow.camera.top = 100;
-moonLight.shadow.camera.bottom = -100;
-scene.add(moonLight);
+    // Moon light - soft directional
+    const moonLight = new THREE.DirectionalLight(0x8888cc, 0.4);
+    moonLight.position.set(-50, 80, -50);
+    moonLight.castShadow = true;
+    moonLight.shadow.mapSize.width = 2048;
+    moonLight.shadow.mapSize.height = 2048;
+    moonLight.shadow.camera.near = 0.5;
+    moonLight.shadow.camera.far = 300;
+    moonLight.shadow.camera.left = -100;
+    moonLight.shadow.camera.right = 100;
+    moonLight.shadow.camera.top = 100;
+    moonLight.shadow.camera.bottom = -100;
+    scene.add(moonLight);
 
-// Materials
-const snowMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffffff,
-    roughness: 0.8,
-    metalness: 0.1
-});
+    // Hemisphere light for sky/ground color variation
+    const hemiLight = new THREE.HemisphereLight(0x4466aa, 0x222244, 0.3);
+    scene.add(hemiLight);
 
-const iceMaterial = new THREE.MeshStandardMaterial({
-    color: 0xadd8e6,
-    roughness: 0.1,
-    metalness: 0.3,
-    transparent: true,
-    opacity: 0.9
-});
+    // Add magical floating lights throughout the scene
+    createFloatingLights();
+}
 
-const buildingMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2a2a3a,
-    roughness: 0.7,
-    metalness: 0.2
-});
+// =============================================================================
+// MATERIALS
+// =============================================================================
+const materials = {
+    snow: new THREE.MeshStandardMaterial({
+        color: 0xeeeeff,
+        roughness: 0.9,
+        metalness: 0.1
+    }),
+    ice: new THREE.MeshStandardMaterial({
+        color: 0x88ccee,
+        roughness: 0.05,
+        metalness: 0.4,
+        transparent: true,
+        opacity: 0.85
+    }),
+    building: new THREE.MeshStandardMaterial({
+        color: 0x1a1a2a,
+        roughness: 0.8,
+        metalness: 0.2
+    }),
+    gold: new THREE.MeshStandardMaterial({
+        color: 0xffd700,
+        roughness: 0.2,
+        metalness: 0.9,
+        emissive: 0xffaa00,
+        emissiveIntensity: 0.4
+    }),
+    wood: new THREE.MeshStandardMaterial({
+        color: 0x5c4033,
+        roughness: 0.9
+    })
+};
 
-const goldMaterial = new THREE.MeshStandardMaterial({
-    color: 0xffd700,
-    roughness: 0.3,
-    metalness: 0.8,
-    emissive: 0xffa500,
-    emissiveIntensity: 0.3
-});
+// =============================================================================
+// FLOATING MAGICAL LIGHTS
+// =============================================================================
+function createFloatingLights() {
+    const colors = [0xff6b9d, 0x6bffb8, 0xffef6b, 0x6bb8ff, 0xb86bff];
+    const positions = [
+        // Scattered throughout the scene
+        [-20, 8, 15], [20, 10, -15], [-40, 6, -20], [40, 9, 25],
+        [-10, 12, -30], [15, 7, 30], [-35, 11, 10], [35, 8, -10],
+        [0, 15, 0], [-25, 9, -35], [25, 11, 35], [-50, 7, 5],
+        [50, 10, -5], [-15, 13, 20], [15, 8, -25], [0, 6, 40]
+    ];
 
-// Ground - snowy NYC streets
+    positions.forEach((pos, i) => {
+        const lightGroup = new THREE.Group();
+        const color = colors[i % colors.length];
+
+        // Glowing orb
+        const orbGeo = new THREE.SphereGeometry(0.2, 16, 16);
+        const orbMat = new THREE.MeshStandardMaterial({
+            color: color,
+            emissive: color,
+            emissiveIntensity: 1.5,
+            transparent: true,
+            opacity: 0.9
+        });
+        const orb = new THREE.Mesh(orbGeo, orbMat);
+        lightGroup.add(orb);
+
+        // Point light
+        const pointLight = new THREE.PointLight(color, 0.8, 15);
+        lightGroup.add(pointLight);
+
+        lightGroup.position.set(...pos);
+        lightGroup.userData = {
+            baseY: pos[1],
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.5 + Math.random() * 0.5,
+            radius: 0.5 + Math.random() * 1
+        };
+
+        scene.add(lightGroup);
+        state.floatingLights.push(lightGroup);
+    });
+}
+
+// =============================================================================
+// GROUND
+// =============================================================================
 function createGround() {
-    const groundGeometry = new THREE.PlaneGeometry(200, 200);
-    const ground = new THREE.Mesh(groundGeometry, snowMaterial);
+    const groundGeometry = new THREE.PlaneGeometry(200, 200, 50, 50);
+    const ground = new THREE.Mesh(groundGeometry, materials.snow);
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
     scene.add(ground);
 
-    // Add some texture variation with small bumps
-    const bumpCount = 500;
+    // Snow mounds - reduced count for performance
+    const bumpCount = 300;
+    const bumpGeo = new THREE.SphereGeometry(1, 6, 6);
+
     for (let i = 0; i < bumpCount; i++) {
-        const size = Math.random() * 0.3 + 0.1;
-        const bumpGeo = new THREE.SphereGeometry(size, 8, 8);
-        const bump = new THREE.Mesh(bumpGeo, snowMaterial);
+        const bump = new THREE.Mesh(bumpGeo, materials.snow);
+        const size = Math.random() * 0.4 + 0.1;
+        bump.scale.set(size, size * 0.3, size);
         bump.position.set(
             (Math.random() - 0.5) * 180,
-            size * 0.3,
+            size * 0.15,
             (Math.random() - 0.5) * 180
         );
-        bump.scale.y = 0.3;
         scene.add(bump);
     }
 }
 
-// Bryant Park Ice Skating Rink
+// =============================================================================
+// BRYANT PARK
+// =============================================================================
 function createBryantPark() {
     const parkGroup = new THREE.Group();
     parkGroup.position.set(-30, 0, 0);
 
     // Ice rink
     const rinkGeometry = new THREE.BoxGeometry(25, 0.1, 20);
-    const rink = new THREE.Mesh(rinkGeometry, iceMaterial);
+    const rink = new THREE.Mesh(rinkGeometry, materials.ice);
     rink.position.y = 0.05;
     rink.receiveShadow = true;
     parkGroup.add(rink);
@@ -150,46 +252,10 @@ function createBryantPark() {
     });
 
     // Warming hut (The Lodge)
-    const hutGroup = new THREE.Group();
-    hutGroup.position.set(0, 0, -15);
-
-    const hutBase = new THREE.Mesh(
-        new THREE.BoxGeometry(15, 4, 6),
-        new THREE.MeshStandardMaterial({ color: 0x4a3728, roughness: 0.8 })
-    );
-    hutBase.position.y = 2;
-    hutBase.castShadow = true;
-    hutGroup.add(hutBase);
-
-    // Roof
-    const roofGeo = new THREE.BoxGeometry(16, 0.5, 7);
-    const roof = new THREE.Mesh(roofGeo, snowMaterial);
-    roof.position.y = 4.25;
-    hutGroup.add(roof);
-
-    // Windows with warm light
-    const windowPositions = [-4, 0, 4];
-    windowPositions.forEach(x => {
-        const windowGeo = new THREE.PlaneGeometry(1.5, 2);
-        const windowMat = new THREE.MeshStandardMaterial({
-            color: 0xffcc66,
-            emissive: 0xffaa33,
-            emissiveIntensity: 0.8
-        });
-        const windowMesh = new THREE.Mesh(windowGeo, windowMat);
-        windowMesh.position.set(x, 2, 3.01);
-        hutGroup.add(windowMesh);
-
-        // Add warm point light
-        const warmLight = new THREE.PointLight(0xffaa33, 0.5, 8);
-        warmLight.position.set(x, 2, 4);
-        hutGroup.add(warmLight);
-    });
-
-    parkGroup.add(hutGroup);
+    createWarmingHut(parkGroup);
 
     // Festive string lights around the rink
-    createStringLights(parkGroup, 13, 10.5, 15);
+    createStringLights(parkGroup, 13, 10.5, 20);
 
     // Christmas trees around the park
     const treePositions = [
@@ -206,55 +272,75 @@ function createBryantPark() {
     createSign(parkGroup, 'BRYANT PARK', 15, 3, 0);
 
     scene.add(parkGroup);
-
-    // Add AI skaters
-    createSkaters(parkGroup.position, 10);
+    createSkaters(parkGroup.position, 8);
 }
 
-// Rockefeller Center
+function createWarmingHut(parent) {
+    const hutGroup = new THREE.Group();
+    hutGroup.position.set(0, 0, -15);
+
+    const hutBase = new THREE.Mesh(
+        new THREE.BoxGeometry(15, 4, 6),
+        new THREE.MeshStandardMaterial({ color: 0x3a2718, roughness: 0.8 })
+    );
+    hutBase.position.y = 2;
+    hutBase.castShadow = true;
+    hutGroup.add(hutBase);
+
+    // Roof with snow
+    const roofGeo = new THREE.BoxGeometry(16, 0.5, 7);
+    const roof = new THREE.Mesh(roofGeo, materials.snow);
+    roof.position.y = 4.25;
+    hutGroup.add(roof);
+
+    // Windows with warm light
+    const windowPositions = [-4, 0, 4];
+    windowPositions.forEach(x => {
+        const windowGeo = new THREE.PlaneGeometry(1.5, 2);
+        const windowMat = new THREE.MeshStandardMaterial({
+            color: 0xffdd88,
+            emissive: 0xffaa44,
+            emissiveIntensity: 1.0
+        });
+        const windowMesh = new THREE.Mesh(windowGeo, windowMat);
+        windowMesh.position.set(x, 2, 3.01);
+        hutGroup.add(windowMesh);
+
+        // Warm point light
+        const warmLight = new THREE.PointLight(0xffaa44, 0.8, 12);
+        warmLight.position.set(x, 2, 5);
+        hutGroup.add(warmLight);
+    });
+
+    parent.add(hutGroup);
+}
+
+// =============================================================================
+// ROCKEFELLER CENTER
+// =============================================================================
 function createRockefellerCenter() {
     const rockyGroup = new THREE.Group();
     rockyGroup.position.set(30, 0, -20);
 
-    // Main building (30 Rock simplified)
+    // Main building (30 Rock)
     const buildingGeo = new THREE.BoxGeometry(20, 50, 15);
-    const building = new THREE.Mesh(buildingGeo, buildingMaterial);
+    const building = new THREE.Mesh(buildingGeo, materials.building);
     building.position.y = 25;
     building.castShadow = true;
     rockyGroup.add(building);
 
-    // Building windows (emissive panels)
-    const windowRows = 15;
-    const windowCols = 6;
-    for (let row = 0; row < windowRows; row++) {
-        for (let col = 0; col < windowCols; col++) {
-            if (Math.random() > 0.3) { // Some windows lit
-                const windowGeo = new THREE.PlaneGeometry(1.5, 2);
-                const windowMat = new THREE.MeshStandardMaterial({
-                    color: 0xffffcc,
-                    emissive: 0xffffaa,
-                    emissiveIntensity: Math.random() * 0.5 + 0.3
-                });
-                const windowMesh = new THREE.Mesh(windowGeo, windowMat);
-                windowMesh.position.set(
-                    (col - windowCols/2 + 0.5) * 2.5,
-                    row * 3 + 5,
-                    7.51
-                );
-                rockyGroup.add(windowMesh);
-            }
-        }
-    }
+    // Building windows
+    createBuildingWindows(rockyGroup, 15, 6, 20, 50, 15);
 
-    // Ice rink (smaller, famous one)
+    // Ice rink
     const rinkGeo = new THREE.CylinderGeometry(12, 12, 0.1, 32);
-    const rink = new THREE.Mesh(rinkGeo, iceMaterial);
+    const rink = new THREE.Mesh(rinkGeo, materials.ice);
     rink.position.set(0, 0.05, 20);
     rockyGroup.add(rink);
 
-    // Rink border
+    // Golden rink border
     const ringGeo = new THREE.TorusGeometry(12, 0.3, 8, 32);
-    const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({ color: 0xffd700 }));
+    const ring = new THREE.Mesh(ringGeo, materials.gold);
     ring.rotation.x = Math.PI / 2;
     ring.position.set(0, 0.3, 20);
     rockyGroup.add(ring);
@@ -264,78 +350,105 @@ function createRockefellerCenter() {
     christmasTree.position.set(0, 0, 8);
     rockyGroup.add(christmasTree);
 
-    // Prometheus statue (golden figure)
+    // Prometheus statue
+    createPrometheusStatue(rockyGroup);
+
+    // Surrounding buildings
+    const sideBuildingPositions = [[-18, 15, 10], [18, 15, 10]];
+    sideBuildingPositions.forEach(pos => {
+        const sideBuildingGeo = new THREE.BoxGeometry(8, 30, 12);
+        const sideBuilding = new THREE.Mesh(sideBuildingGeo, materials.building);
+        sideBuilding.position.set(...pos);
+        sideBuilding.castShadow = true;
+        rockyGroup.add(sideBuilding);
+    });
+
+    // Channel Gardens angels
+    for (let i = 0; i < 6; i++) {
+        const side = i % 2 === 0 ? -1 : 1;
+        const angelGroup = createAngel();
+        angelGroup.position.set(side * 4, 0, 25 + Math.floor(i / 2) * 8);
+        angelGroup.rotation.y = side * Math.PI / 2;
+        rockyGroup.add(angelGroup);
+    }
+
+    // Sign
+    createSign(rockyGroup, 'ROCKEFELLER CENTER', 0, 3, 40);
+
+    scene.add(rockyGroup);
+    createSkaters(new THREE.Vector3(30, 0, 0), 6);
+}
+
+function createBuildingWindows(parent, rows, cols, offsetX, height, depth) {
+    for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+            if (Math.random() > 0.35) {
+                const windowGeo = new THREE.PlaneGeometry(1.5, 2);
+                const intensity = Math.random() * 0.5 + 0.3;
+                const windowMat = new THREE.MeshStandardMaterial({
+                    color: 0xffffcc,
+                    emissive: 0xffffaa,
+                    emissiveIntensity: intensity
+                });
+                const windowMesh = new THREE.Mesh(windowGeo, windowMat);
+                windowMesh.position.set(
+                    (col - cols / 2 + 0.5) * 2.5,
+                    row * 3 + 5,
+                    depth / 2 + 0.01
+                );
+                parent.add(windowMesh);
+            }
+        }
+    }
+}
+
+function createPrometheusStatue(parent) {
     const statueGroup = new THREE.Group();
     statueGroup.position.set(0, 0, 20);
 
-    // Simplified statue
+    // Body
     const bodyGeo = new THREE.CapsuleGeometry(0.8, 2, 8, 16);
-    const body = new THREE.Mesh(bodyGeo, goldMaterial);
+    const body = new THREE.Mesh(bodyGeo, materials.gold);
     body.position.y = 2;
     body.rotation.z = Math.PI * 0.1;
     statueGroup.add(body);
 
     // Head
     const headGeo = new THREE.SphereGeometry(0.5, 16, 16);
-    const head = new THREE.Mesh(headGeo, goldMaterial);
+    const head = new THREE.Mesh(headGeo, materials.gold);
     head.position.set(0.2, 3.5, 0);
     statueGroup.add(head);
 
     // Pedestal
     const pedestalGeo = new THREE.CylinderGeometry(1.5, 2, 1, 16);
-    const pedestal = new THREE.Mesh(pedestalGeo, goldMaterial);
+    const pedestal = new THREE.Mesh(pedestalGeo, materials.gold);
     pedestal.position.y = 0.5;
     statueGroup.add(pedestal);
 
-    rockyGroup.add(statueGroup);
+    // Spotlight on statue
+    const spotlight = new THREE.SpotLight(0xffd700, 2, 20, Math.PI / 6, 0.5);
+    spotlight.position.set(0, 8, 25);
+    spotlight.target = body;
+    parent.add(spotlight);
 
-    // Surrounding buildings
-    const sideBuildingPositions = [
-        [-18, 15, 10], [18, 15, 10]
-    ];
-    sideBuildingPositions.forEach(pos => {
-        const sideBuildingGeo = new THREE.BoxGeometry(8, 30, 12);
-        const sideBuilding = new THREE.Mesh(sideBuildingGeo, buildingMaterial);
-        sideBuilding.position.set(...pos);
-        sideBuilding.castShadow = true;
-        rockyGroup.add(sideBuilding);
-    });
-
-    // Channel Gardens (pathway with angels)
-    for (let i = 0; i < 6; i++) {
-        const side = i % 2 === 0 ? -1 : 1;
-        const angelGroup = createAngel();
-        angelGroup.position.set(side * 4, 0, 25 + Math.floor(i/2) * 8);
-        angelGroup.rotation.y = side * Math.PI / 2;
-        rockyGroup.add(angelGroup);
-    }
-
-    // Sign
-    createSign(rockyGroup, 'ROCKEFELLER CENTER', 0, 3, 35);
-
-    scene.add(rockyGroup);
-
-    // Add skaters
-    createSkaters(new THREE.Vector3(30, 0, 0), 8);
+    parent.add(statueGroup);
 }
 
-// Giant Christmas Tree for Rockefeller Center
+// =============================================================================
+// GIANT CHRISTMAS TREE
+// =============================================================================
 function createGiantChristmasTree() {
     const treeGroup = new THREE.Group();
 
-    // Tree trunk
+    // Trunk
     const trunkGeo = new THREE.CylinderGeometry(0.8, 1, 3, 8);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3520 });
     const trunk = new THREE.Mesh(trunkGeo, trunkMat);
     trunk.position.y = 1.5;
     treeGroup.add(trunk);
 
-    // Tree layers (cone shapes)
-    const treeMat = new THREE.MeshStandardMaterial({
-        color: 0x0d5c0d,
-        roughness: 0.8
-    });
-
+    // Tree layers
+    const treeMat = new THREE.MeshStandardMaterial({ color: 0x0d5c0d, roughness: 0.8 });
     const layers = [
         { radius: 6, height: 8, y: 7 },
         { radius: 5, height: 7, y: 13 },
@@ -353,40 +466,15 @@ function createGiantChristmasTree() {
     });
 
     // Star on top
-    const starGroup = new THREE.Group();
+    const starGroup = createStar();
     starGroup.position.y = 28;
-
-    const starMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xffd700,
-        emissiveIntensity: 1
-    });
-
-    // Star points
-    for (let i = 0; i < 5; i++) {
-        const pointGeo = new THREE.ConeGeometry(0.3, 1.5, 4);
-        const point = new THREE.Mesh(pointGeo, starMat);
-        point.rotation.z = Math.PI;
-        point.rotation.y = (i * Math.PI * 2) / 5;
-        point.position.x = Math.sin(point.rotation.y) * 0.8;
-        point.position.z = Math.cos(point.rotation.y) * 0.8;
-        starGroup.add(point);
-    }
-
-    const starCore = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), starMat);
-    starGroup.add(starCore);
-
-    // Star light
-    const starLight = new THREE.PointLight(0xffd700, 2, 30);
-    starGroup.add(starLight);
-
     treeGroup.add(starGroup);
 
     // Christmas lights on tree
-    const lightColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
-    const lightsPerLayer = 20;
+    const lightColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xff6600];
+    const lightsPerLayer = 25;
 
-    layers.forEach((layer, layerIndex) => {
+    layers.forEach((layer) => {
         for (let i = 0; i < lightsPerLayer; i++) {
             const angle = (i / lightsPerLayer) * Math.PI * 2;
             const radius = layer.radius * 0.85;
@@ -397,26 +485,33 @@ function createGiantChristmasTree() {
             const lightMat = new THREE.MeshStandardMaterial({
                 color: color,
                 emissive: color,
-                emissiveIntensity: 0.8
+                emissiveIntensity: 1.0
             });
             const lightBulb = new THREE.Mesh(lightGeo, lightMat);
             lightBulb.position.set(
                 Math.sin(angle) * radius,
-                layer.y + heightOffset - layer.height/4,
+                layer.y + heightOffset - layer.height / 4,
                 Math.cos(angle) * radius
             );
             lightBulb.userData = {
-                baseEmissive: 0.8,
+                baseEmissive: 1.0,
                 phase: Math.random() * Math.PI * 2
             };
             state.lights.push(lightBulb);
             treeGroup.add(lightBulb);
+
+            // Add actual point lights for some bulbs
+            if (i % 5 === 0) {
+                const pointLight = new THREE.PointLight(color, 0.3, 4);
+                pointLight.position.copy(lightBulb.position);
+                treeGroup.add(pointLight);
+            }
         }
     });
 
-    // Add some larger ornaments
-    const ornamentColors = [0xff0000, 0xffd700, 0x4169e1, 0x9400d3];
-    for (let i = 0; i < 30; i++) {
+    // Ornaments
+    const ornamentColors = [0xff0000, 0xffd700, 0x4169e1, 0x9400d3, 0x00ff88];
+    for (let i = 0; i < 35; i++) {
         const layerIndex = Math.floor(Math.random() * layers.length);
         const layer = layers[layerIndex];
         const angle = Math.random() * Math.PI * 2;
@@ -440,7 +535,39 @@ function createGiantChristmasTree() {
     return treeGroup;
 }
 
-// Regular Christmas tree
+function createStar() {
+    const starGroup = new THREE.Group();
+
+    const starMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0xffd700,
+        emissiveIntensity: 2.0
+    });
+
+    // Star points
+    for (let i = 0; i < 5; i++) {
+        const pointGeo = new THREE.ConeGeometry(0.3, 1.5, 4);
+        const point = new THREE.Mesh(pointGeo, starMat);
+        point.rotation.z = Math.PI;
+        point.rotation.y = (i * Math.PI * 2) / 5;
+        point.position.x = Math.sin(point.rotation.y) * 0.8;
+        point.position.z = Math.cos(point.rotation.y) * 0.8;
+        starGroup.add(point);
+    }
+
+    const starCore = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 16), starMat);
+    starGroup.add(starCore);
+
+    // Star light
+    const starLight = new THREE.PointLight(0xffd700, 3, 40);
+    starGroup.add(starLight);
+
+    return starGroup;
+}
+
+// =============================================================================
+// REGULAR CHRISTMAS TREE
+// =============================================================================
 function createChristmasTree(height = 3) {
     const treeGroup = new THREE.Group();
 
@@ -462,30 +589,32 @@ function createChristmasTree(height = 3) {
         treeGroup.add(cone);
     }
 
-    // Add lights
-    const lightColors = [0xff0000, 0x00ff00, 0xffff00, 0x0000ff];
-    for (let i = 0; i < 8; i++) {
-        const angle = (i / 8) * Math.PI * 2;
+    // Lights
+    const lightColors = [0xff0000, 0x00ff00, 0xffff00, 0x0000ff, 0xff00ff];
+    for (let i = 0; i < 10; i++) {
+        const angle = (i / 10) * Math.PI * 2;
         const lightGeo = new THREE.SphereGeometry(0.08, 8, 8);
         const color = lightColors[i % lightColors.length];
         const lightMat = new THREE.MeshStandardMaterial({
             color: color,
             emissive: color,
-            emissiveIntensity: 0.6
+            emissiveIntensity: 0.8
         });
         const lightBulb = new THREE.Mesh(lightGeo, lightMat);
         lightBulb.position.set(
             Math.sin(angle) * 0.5,
-            1 + Math.random() * height * 0.5,
+            0.8 + Math.random() * height * 0.6,
             Math.cos(angle) * 0.5
         );
+        lightBulb.userData = { baseEmissive: 0.8, phase: i * 0.7 };
+        state.lights.push(lightBulb);
         treeGroup.add(lightBulb);
     }
 
-    // Snow on top
+    // Snow cap
     const snowCap = new THREE.Mesh(
         new THREE.SphereGeometry(0.15, 8, 8),
-        snowMaterial
+        materials.snow
     );
     snowCap.position.y = height + 0.3;
     snowCap.scale.y = 0.5;
@@ -494,25 +623,28 @@ function createChristmasTree(height = 3) {
     return treeGroup;
 }
 
-// Create angel decoration
+// =============================================================================
+// ANGEL DECORATION
+// =============================================================================
 function createAngel() {
     const angelGroup = new THREE.Group();
 
     const pedestalGeo = new THREE.BoxGeometry(1, 2, 1);
-    const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
+    const pedestalMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
     const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
     pedestal.position.y = 1;
     angelGroup.add(pedestal);
 
-    // Angel body
-    const bodyGeo = new THREE.ConeGeometry(0.4, 1.2, 8);
     const angelMat = new THREE.MeshStandardMaterial({
         color: 0xffd700,
         emissive: 0xffa500,
-        emissiveIntensity: 0.3,
-        metalness: 0.6,
+        emissiveIntensity: 0.5,
+        metalness: 0.7,
         roughness: 0.3
     });
+
+    // Body
+    const bodyGeo = new THREE.ConeGeometry(0.4, 1.2, 8);
     const body = new THREE.Mesh(bodyGeo, angelMat);
     body.position.y = 2.8;
     angelGroup.add(body);
@@ -539,47 +671,53 @@ function createAngel() {
     trumpet.rotation.z = -Math.PI / 4;
     angelGroup.add(trumpet);
 
+    // Angel glow
+    const angelLight = new THREE.PointLight(0xffd700, 0.4, 6);
+    angelLight.position.y = 3;
+    angelGroup.add(angelLight);
+
     return angelGroup;
 }
 
-// String lights
+// =============================================================================
+// STRING LIGHTS
+// =============================================================================
 function createStringLights(parent, halfWidth, halfDepth, count) {
-    const lightColors = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3, 0xf38181];
+    const lightColors = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3, 0xf38181, 0xa29bfe];
 
-    // Create light string along perimeter
     const positions = [];
     for (let i = 0; i <= count; i++) {
         const t = i / count;
         const x = halfWidth * Math.cos(t * Math.PI * 2);
         const z = halfDepth * Math.sin(t * Math.PI * 2);
-        positions.push(new THREE.Vector3(x, 3 + Math.sin(t * Math.PI * 8) * 0.2, z));
+        positions.push(new THREE.Vector3(x, 3.5 + Math.sin(t * Math.PI * 8) * 0.3, z));
     }
 
     // Wire
     const wireGeo = new THREE.BufferGeometry().setFromPoints(positions);
-    const wireMat = new THREE.LineBasicMaterial({ color: 0x333333 });
+    const wireMat = new THREE.LineBasicMaterial({ color: 0x222222 });
     const wire = new THREE.Line(wireGeo, wireMat);
     parent.add(wire);
 
     // Bulbs
     positions.forEach((pos, i) => {
         if (i % 2 === 0) {
-            const bulbGeo = new THREE.SphereGeometry(0.1, 8, 8);
+            const bulbGeo = new THREE.SphereGeometry(0.12, 8, 8);
             const color = lightColors[i % lightColors.length];
             const bulbMat = new THREE.MeshStandardMaterial({
                 color: color,
                 emissive: color,
-                emissiveIntensity: 0.7
+                emissiveIntensity: 0.9
             });
             const bulb = new THREE.Mesh(bulbGeo, bulbMat);
             bulb.position.copy(pos);
-            bulb.userData = { baseEmissive: 0.7, phase: i * 0.5 };
+            bulb.userData = { baseEmissive: 0.9, phase: i * 0.4 };
             state.lights.push(bulb);
             parent.add(bulb);
 
-            // Small point light for every 4th bulb
-            if (i % 4 === 0) {
-                const pointLight = new THREE.PointLight(color, 0.3, 5);
+            // Point lights for some bulbs
+            if (i % 3 === 0) {
+                const pointLight = new THREE.PointLight(color, 0.4, 6);
                 pointLight.position.copy(pos);
                 parent.add(pointLight);
             }
@@ -587,14 +725,16 @@ function createStringLights(parent, halfWidth, halfDepth, count) {
     });
 }
 
-// Location sign
+// =============================================================================
+// LOCATION SIGN
+// =============================================================================
 function createSign(parent, text, x, y, z) {
     const canvas = document.createElement('canvas');
     canvas.width = 512;
     canvas.height = 128;
     const ctx = canvas.getContext('2d');
 
-    ctx.fillStyle = '#1a1a2e';
+    ctx.fillStyle = '#0a0a1a';
     ctx.fillRect(0, 0, 512, 128);
 
     ctx.strokeStyle = '#ffd700';
@@ -612,14 +752,16 @@ function createSign(parent, text, x, y, z) {
     const signMat = new THREE.MeshStandardMaterial({
         map: texture,
         emissive: 0xffd700,
-        emissiveIntensity: 0.2
+        emissiveIntensity: 0.3
     });
     const sign = new THREE.Mesh(signGeo, signMat);
     sign.position.set(x, y, z);
     parent.add(sign);
 }
 
-// NYC Buildings skyline
+// =============================================================================
+// NYC SKYLINE
+// =============================================================================
 function createSkyline() {
     const buildingConfigs = [
         { x: -60, z: -40, w: 15, h: 40, d: 15 },
@@ -634,7 +776,7 @@ function createSkyline() {
 
     buildingConfigs.forEach(config => {
         const buildingGeo = new THREE.BoxGeometry(config.w, config.h, config.d);
-        const building = new THREE.Mesh(buildingGeo, buildingMaterial);
+        const building = new THREE.Mesh(buildingGeo, materials.building);
         building.position.set(config.x, config.h / 2, config.z);
         building.castShadow = true;
         scene.add(building);
@@ -653,9 +795,9 @@ function createSkyline() {
                     });
                     const windowMesh = new THREE.Mesh(windowGeo, windowMat);
                     windowMesh.position.set(
-                        config.x + (col - windowCols/2 + 0.5) * 2.5,
+                        config.x + (col - windowCols / 2 + 0.5) * 2.5,
                         row * 3.5 + 3,
-                        config.z + config.d/2 + 0.01
+                        config.z + config.d / 2 + 0.01
                     );
                     scene.add(windowMesh);
                 }
@@ -665,19 +807,21 @@ function createSkyline() {
         // Snow on roof
         const snowRoof = new THREE.Mesh(
             new THREE.BoxGeometry(config.w + 0.5, 0.3, config.d + 0.5),
-            snowMaterial
+            materials.snow
         );
         snowRoof.position.set(config.x, config.h + 0.15, config.z);
         scene.add(snowRoof);
     });
 }
 
-// Street lamps
+// =============================================================================
+// STREET LAMPS
+// =============================================================================
 function createStreetLamps() {
     const lampPositions = [
         [-15, 15], [15, 15], [-15, -15], [15, -15],
         [-50, 20], [50, 20], [0, 40], [0, -40],
-        [-40, 30], [40, 30]
+        [-40, 30], [40, 30], [-55, -10], [55, -10]
     ];
 
     lampPositions.forEach(([x, z]) => {
@@ -695,16 +839,15 @@ function createStreetLamps() {
         const headMat = new THREE.MeshStandardMaterial({
             color: 0xffffcc,
             emissive: 0xffaa44,
-            emissiveIntensity: 0.8
+            emissiveIntensity: 1.0
         });
         const head = new THREE.Mesh(headGeo, headMat);
         head.position.y = 5.3;
         lampGroup.add(head);
 
         // Light
-        const light = new THREE.PointLight(0xffaa44, 1, 15);
+        const light = new THREE.PointLight(0xffaa44, 1.2, 18);
         light.position.y = 5;
-        light.castShadow = true;
         lampGroup.add(light);
 
         lampGroup.position.set(x, 0, z);
@@ -712,9 +855,11 @@ function createStreetLamps() {
     });
 }
 
-// Snowfall
+// =============================================================================
+// SNOWFALL
+// =============================================================================
 function createSnowfall() {
-    const snowflakeCount = 2000;
+    const snowflakeCount = CONFIG.snowflakeCount;
     const snowflakeGeo = new THREE.BufferGeometry();
     const positions = new Float32Array(snowflakeCount * 3);
     const velocities = [];
@@ -725,9 +870,9 @@ function createSnowfall() {
         positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
 
         velocities.push({
-            y: Math.random() * 0.02 + 0.01,
-            x: (Math.random() - 0.5) * 0.01,
-            z: (Math.random() - 0.5) * 0.01
+            y: Math.random() * 0.015 + 0.008,
+            x: (Math.random() - 0.5) * 0.008,
+            z: (Math.random() - 0.5) * 0.008
         });
     }
 
@@ -735,9 +880,9 @@ function createSnowfall() {
 
     const snowflakeMat = new THREE.PointsMaterial({
         color: 0xffffff,
-        size: 0.3,
+        size: 0.25,
         transparent: true,
-        opacity: 0.8,
+        opacity: 0.85,
         depthWrite: false
     });
 
@@ -747,7 +892,9 @@ function createSnowfall() {
     state.snowflakes.push(snowfall);
 }
 
-// AI Ice skaters
+// =============================================================================
+// AI ICE SKATERS
+// =============================================================================
 function createSkaters(rinkCenter, count) {
     const skaterColors = [0xff6b6b, 0x4ecdc4, 0xffe66d, 0x95e1d3, 0xa29bfe, 0xfd79a8];
 
@@ -792,7 +939,7 @@ function createSkaters(rinkCenter, count) {
             center: rinkCenter.clone(),
             angle: angle,
             radius: radius,
-            speed: 0.005 + Math.random() * 0.01,
+            speed: 0.003 + Math.random() * 0.006,
             wobble: Math.random() * Math.PI * 2
         };
 
@@ -801,7 +948,9 @@ function createSkaters(rinkCenter, count) {
     }
 }
 
-// Collectible ornaments
+// =============================================================================
+// COLLECTIBLES
+// =============================================================================
 function createCollectibles() {
     const collectiblePositions = [
         // Around Bryant Park
@@ -819,7 +968,7 @@ function createCollectibles() {
 
         // Main sphere
         const sphereGeo = new THREE.SphereGeometry(0.4, 16, 16);
-        const sphere = new THREE.Mesh(sphereGeo, goldMaterial);
+        const sphere = new THREE.Mesh(sphereGeo, materials.gold);
         ornamentGroup.add(sphere);
 
         // Cap
@@ -830,7 +979,7 @@ function createCollectibles() {
         ornamentGroup.add(cap);
 
         // Glow
-        const glowLight = new THREE.PointLight(0xffd700, 0.5, 5);
+        const glowLight = new THREE.PointLight(0xffd700, 0.6, 6);
         ornamentGroup.add(glowLight);
 
         ornamentGroup.position.set(...pos);
@@ -845,7 +994,9 @@ function createCollectibles() {
     });
 }
 
-// Benches
+// =============================================================================
+// BENCHES
+// =============================================================================
 function createBenches() {
     const benchPositions = [
         [-45, 0, 10], [-45, 0, -10], [55, 0, 0], [0, 0, 25]
@@ -854,20 +1005,16 @@ function createBenches() {
     benchPositions.forEach(pos => {
         const benchGroup = new THREE.Group();
 
-        // Seat
         const seatGeo = new THREE.BoxGeometry(2, 0.15, 0.6);
-        const woodMat = new THREE.MeshStandardMaterial({ color: 0x5c4033 });
-        const seat = new THREE.Mesh(seatGeo, woodMat);
+        const seat = new THREE.Mesh(seatGeo, materials.wood);
         seat.position.y = 0.5;
         benchGroup.add(seat);
 
-        // Back
         const backGeo = new THREE.BoxGeometry(2, 0.6, 0.1);
-        const back = new THREE.Mesh(backGeo, woodMat);
+        const back = new THREE.Mesh(backGeo, materials.wood);
         back.position.set(0, 0.85, -0.25);
         benchGroup.add(back);
 
-        // Legs
         const legGeo = new THREE.BoxGeometry(0.1, 0.5, 0.5);
         const metalMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
         [-0.8, 0.8].forEach(x => {
@@ -878,7 +1025,7 @@ function createBenches() {
 
         // Snow on bench
         const snowGeo = new THREE.BoxGeometry(1.8, 0.1, 0.5);
-        const snow = new THREE.Mesh(snowGeo, snowMaterial);
+        const snow = new THREE.Mesh(snowGeo, materials.snow);
         snow.position.y = 0.6;
         benchGroup.add(snow);
 
@@ -888,19 +1035,19 @@ function createBenches() {
     });
 }
 
-// Hot dog cart (NYC staple!)
+// =============================================================================
+// HOT DOG CART
+// =============================================================================
 function createHotDogCart() {
     const cartGroup = new THREE.Group();
     cartGroup.position.set(0, 0, 20);
 
-    // Cart body
     const cartGeo = new THREE.BoxGeometry(2, 1.2, 1);
     const cartMat = new THREE.MeshStandardMaterial({ color: 0xffcc00 });
     const cart = new THREE.Mesh(cartGeo, cartMat);
     cart.position.y = 1.2;
     cartGroup.add(cart);
 
-    // Umbrella
     const umbrellaGeo = new THREE.ConeGeometry(1.5, 0.5, 8, 1, true);
     const umbrellaMat = new THREE.MeshStandardMaterial({
         color: 0xff0000,
@@ -910,14 +1057,12 @@ function createHotDogCart() {
     umbrella.position.y = 2.5;
     cartGroup.add(umbrella);
 
-    // Pole
     const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1);
     const poleMat = new THREE.MeshStandardMaterial({ color: 0x888888 });
     const pole = new THREE.Mesh(poleGeo, poleMat);
     pole.position.y = 2;
     cartGroup.add(pole);
 
-    // Wheels
     const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.1, 16);
     const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
     [[-0.7, -0.6], [0.7, -0.6]].forEach(([x, z]) => {
@@ -930,7 +1075,7 @@ function createHotDogCart() {
     // Snow on umbrella
     const snowUmbrella = new THREE.Mesh(
         new THREE.ConeGeometry(1.55, 0.15, 8),
-        snowMaterial
+        materials.snow
     );
     snowUmbrella.position.y = 2.55;
     cartGroup.add(snowUmbrella);
@@ -938,9 +1083,12 @@ function createHotDogCart() {
     scene.add(cartGroup);
 }
 
-// Input handling
+// =============================================================================
+// INPUT HANDLING
+// =============================================================================
 function setupInputHandlers() {
     const onKeyDown = (event) => {
+        if (state.gameWon) return;
         switch (event.code) {
             case 'ArrowUp':
             case 'KeyW':
@@ -960,7 +1108,7 @@ function setupInputHandlers() {
                 break;
             case 'Space':
                 if (state.canJump) {
-                    state.velocity.y = 8;
+                    state.velocity.y = CONFIG.movement.jumpForce;
                     state.canJump = false;
                 }
                 break;
@@ -992,8 +1140,12 @@ function setupInputHandlers() {
     document.addEventListener('keyup', onKeyUp);
 }
 
-// Check location for UI
+// =============================================================================
+// LOCATION CHECK
+// =============================================================================
 function checkLocation() {
+    if (state.gameWon) return;
+
     const pos = camera.position;
     let location = '';
 
@@ -1007,7 +1159,7 @@ function checkLocation() {
         state.currentLocation = location;
         const indicator = document.getElementById('location-indicator');
         if (location) {
-            indicator.textContent = `📍 ${location}`;
+            indicator.textContent = `${location}`;
             indicator.style.opacity = '1';
         } else {
             indicator.style.opacity = '0';
@@ -1015,42 +1167,165 @@ function checkLocation() {
     }
 }
 
-// Animation loop
+// =============================================================================
+// WIN SCENE
+// =============================================================================
+function triggerWinScene() {
+    state.gameWon = true;
+    state.winAnimationProgress = 0;
+    controls.unlock();
+
+    // Update UI
+    document.getElementById('instructions').innerHTML =
+        '🎄 CONGRATULATIONS! You\'ve collected all the holiday magic! 🎄<br>Happy Holidays from NYC!';
+    document.getElementById('instructions').style.opacity = '1';
+
+    // Show win message
+    const indicator = document.getElementById('location-indicator');
+    indicator.innerHTML = '✨ WINNER! ✨';
+    indicator.style.opacity = '1';
+    indicator.style.fontSize = '2rem';
+    indicator.style.color = '#ffd700';
+
+    // Create fireworks
+    createFireworks();
+}
+
+function createFireworks() {
+    const fireworkColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffd700, 0xff00ff, 0x00ffff];
+
+    for (let i = 0; i < 8; i++) {
+        setTimeout(() => {
+            const x = (Math.random() - 0.5) * 80;
+            const z = (Math.random() - 0.5) * 80;
+            const y = 20 + Math.random() * 30;
+            const color = fireworkColors[Math.floor(Math.random() * fireworkColors.length)];
+
+            // Create explosion particles
+            const particleCount = 50;
+            const particleGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const velocities = [];
+
+            for (let j = 0; j < particleCount; j++) {
+                positions[j * 3] = x;
+                positions[j * 3 + 1] = y;
+                positions[j * 3 + 2] = z;
+
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.random() * Math.PI;
+                const speed = 0.2 + Math.random() * 0.3;
+                velocities.push({
+                    x: Math.sin(phi) * Math.cos(theta) * speed,
+                    y: Math.cos(phi) * speed,
+                    z: Math.sin(phi) * Math.sin(theta) * speed,
+                    life: 1.0
+                });
+            }
+
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const particleMat = new THREE.PointsMaterial({
+                color: color,
+                size: 0.5,
+                transparent: true,
+                opacity: 1
+            });
+
+            const firework = new THREE.Points(particleGeo, particleMat);
+            firework.userData = { velocities, startTime: performance.now() };
+            scene.add(firework);
+
+            // Add bright flash
+            const flash = new THREE.PointLight(color, 5, 50);
+            flash.position.set(x, y, z);
+            scene.add(flash);
+
+            // Fade out flash
+            setTimeout(() => scene.remove(flash), 200);
+
+            // Animate and remove firework
+            const animateFirework = () => {
+                const elapsed = (performance.now() - firework.userData.startTime) / 1000;
+                if (elapsed > 2) {
+                    scene.remove(firework);
+                    return;
+                }
+
+                const positions = firework.geometry.attributes.position.array;
+                firework.userData.velocities.forEach((vel, idx) => {
+                    positions[idx * 3] += vel.x;
+                    positions[idx * 3 + 1] += vel.y - 0.01; // gravity
+                    positions[idx * 3 + 2] += vel.z;
+                    vel.life -= 0.02;
+                });
+                firework.geometry.attributes.position.needsUpdate = true;
+                firework.material.opacity = Math.max(0, 1 - elapsed / 2);
+
+                requestAnimationFrame(animateFirework);
+            };
+            animateFirework();
+
+        }, i * 500);
+    }
+}
+
+// =============================================================================
+// ANIMATION LOOP
+// =============================================================================
 const clock = new THREE.Clock();
-let prevTime = performance.now();
 
 function animate() {
     requestAnimationFrame(animate);
 
-    const time = performance.now();
-    const delta = (time - prevTime) / 1000;
-    prevTime = time;
+    const delta = Math.min(clock.getDelta(), 0.1); // Cap delta to prevent large jumps
+    const elapsedTime = clock.getElapsedTime();
 
-    // Player movement (ice skating physics - slippery!)
-    if (controls.isLocked) {
-        const friction = 0.98; // Slippery ice
-        const acceleration = 25;
+    // Player movement - smoother physics
+    if (controls.isLocked && !state.gameWon) {
+        const { acceleration, friction, maxSpeed, gravity, smoothing } = CONFIG.movement;
 
-        state.velocity.x *= friction;
-        state.velocity.z *= friction;
-        state.velocity.y -= 20 * delta; // Gravity
+        // Apply friction smoothly
+        state.velocity.x *= Math.pow(friction, delta * 60);
+        state.velocity.z *= Math.pow(friction, delta * 60);
 
+        // Gravity
+        state.velocity.y -= gravity * delta;
+
+        // Calculate target direction
         state.direction.z = Number(state.moveForward) - Number(state.moveBackward);
         state.direction.x = Number(state.moveRight) - Number(state.moveLeft);
         state.direction.normalize();
 
+        // Calculate target velocity
+        state.targetVelocity.x = 0;
+        state.targetVelocity.z = 0;
+
         if (state.moveForward || state.moveBackward) {
-            state.velocity.z -= state.direction.z * acceleration * delta;
+            state.targetVelocity.z = -state.direction.z * acceleration;
         }
         if (state.moveLeft || state.moveRight) {
-            state.velocity.x -= state.direction.x * acceleration * delta;
+            state.targetVelocity.x = -state.direction.x * acceleration;
         }
 
+        // Smooth interpolation to target velocity
+        state.velocity.x += (state.targetVelocity.x - state.velocity.x) * smoothing;
+        state.velocity.z += (state.targetVelocity.z - state.velocity.z) * smoothing;
+
+        // Clamp to max speed
+        const horizontalSpeed = Math.sqrt(state.velocity.x ** 2 + state.velocity.z ** 2);
+        if (horizontalSpeed > maxSpeed) {
+            const scale = maxSpeed / horizontalSpeed;
+            state.velocity.x *= scale;
+            state.velocity.z *= scale;
+        }
+
+        // Apply movement
         controls.moveRight(-state.velocity.x * delta);
         controls.moveForward(-state.velocity.z * delta);
-
         camera.position.y += state.velocity.y * delta;
 
+        // Ground check
         if (camera.position.y < 2) {
             camera.position.y = 2;
             state.velocity.y = 0;
@@ -1062,19 +1337,38 @@ function animate() {
         camera.position.z = Math.max(-90, Math.min(90, camera.position.z));
     }
 
+    // Win animation - camera slowly rises and looks at tree
+    if (state.gameWon) {
+        state.winAnimationProgress += delta * 0.3;
+        const progress = Math.min(state.winAnimationProgress, 1);
+
+        // Slowly rise and look at Rockefeller tree
+        const targetPos = new THREE.Vector3(30, 15 + progress * 10, 30);
+        camera.position.lerp(targetPos, 0.02);
+
+        const treePos = new THREE.Vector3(30, 15, -12);
+        camera.lookAt(treePos);
+    }
+
     // Update skaters
     state.skaters.forEach(skater => {
         const data = skater.userData;
         data.angle += data.speed;
-        data.wobble += 0.05;
+        data.wobble += 0.03;
 
         skater.position.x = data.center.x + Math.cos(data.angle) * data.radius;
         skater.position.z = data.center.z + Math.sin(data.angle) * data.radius;
         skater.rotation.y = -data.angle + Math.PI / 2;
+        skater.position.y = Math.sin(data.wobble) * 0.04;
+        skater.rotation.z = Math.sin(data.wobble) * 0.08;
+    });
 
-        // Skating wobble
-        skater.position.y = Math.sin(data.wobble) * 0.05;
-        skater.rotation.z = Math.sin(data.wobble) * 0.1;
+    // Update floating magical lights
+    state.floatingLights.forEach(light => {
+        const data = light.userData;
+        light.position.y = data.baseY + Math.sin(elapsedTime * data.speed + data.phase) * data.radius;
+        light.position.x += Math.sin(elapsedTime * 0.3 + data.phase) * 0.005;
+        light.position.z += Math.cos(elapsedTime * 0.3 + data.phase) * 0.005;
     });
 
     // Update snowfall
@@ -1083,13 +1377,12 @@ function animate() {
         const velocities = snowfall.userData.velocities;
 
         for (let i = 0; i < positions.length / 3; i++) {
-            positions[i * 3] += velocities[i].x + Math.sin(time * 0.001 + i) * 0.002;
+            positions[i * 3] += velocities[i].x + Math.sin(elapsedTime * 0.5 + i * 0.1) * 0.002;
             positions[i * 3 + 1] -= velocities[i].y;
             positions[i * 3 + 2] += velocities[i].z;
 
-            // Reset snowflake when it hits ground
             if (positions[i * 3 + 1] < 0) {
-                positions[i * 3 + 1] = 100;
+                positions[i * 3 + 1] = 80 + Math.random() * 20;
                 positions[i * 3] = (Math.random() - 0.5) * 200;
                 positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
             }
@@ -1098,27 +1391,24 @@ function animate() {
     });
 
     // Update collectibles
-    const elapsedTime = clock.getElapsedTime();
     state.collectibles.forEach(collectible => {
         if (!collectible.userData.collected) {
-            // Floating animation
             collectible.position.y = collectible.userData.baseY +
                 Math.sin(elapsedTime * 2 + collectible.userData.phase) * 0.3;
-            collectible.rotation.y += 0.02;
+            collectible.rotation.y += 0.015;
 
             // Check collection
             const distance = camera.position.distanceTo(collectible.position);
-            if (distance < 2) {
+            if (distance < CONFIG.collectRadius) {
                 collectible.userData.collected = true;
                 collectible.visible = false;
                 state.score += 10;
                 document.getElementById('score').textContent = state.score;
 
-                // Victory check
-                const allCollected = state.collectibles.every(c => c.userData.collected);
-                if (allCollected) {
-                    document.getElementById('location-indicator').textContent = '🎄 HAPPY HOLIDAYS! You collected all the magic! 🎄';
-                    document.getElementById('location-indicator').style.opacity = '1';
+                // Check win condition
+                const collected = state.collectibles.filter(c => c.userData.collected).length;
+                if (collected >= state.totalCollectibles) {
+                    triggerWinScene();
                 }
             }
         }
@@ -1127,26 +1417,29 @@ function animate() {
     // Twinkle lights
     state.lights.forEach(light => {
         if (light.userData && light.material) {
-            const twinkle = Math.sin(elapsedTime * 3 + light.userData.phase) * 0.3 + 0.7;
+            const twinkle = Math.sin(elapsedTime * 4 + light.userData.phase) * 0.4 + 0.6;
             light.material.emissiveIntensity = light.userData.baseEmissive * twinkle;
         }
     });
 
-    // Check location
     checkLocation();
-
     renderer.render(scene, camera);
 }
 
-// Window resize
+// =============================================================================
+// WINDOW RESIZE
+// =============================================================================
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// Initialize game
+// =============================================================================
+// INITIALIZE GAME
+// =============================================================================
 function init() {
+    setupLighting();
     createGround();
     createBryantPark();
     createRockefellerCenter();
@@ -1157,6 +1450,9 @@ function init() {
     createBenches();
     createHotDogCart();
     setupInputHandlers();
+
+    // Update UI with total collectibles
+    document.getElementById('score').textContent = '0';
 
     // Hide loading
     document.getElementById('loading').style.display = 'none';
