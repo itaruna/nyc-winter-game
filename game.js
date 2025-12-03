@@ -5,21 +5,21 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 // CONFIGURATION
 // =============================================================================
 const CONFIG = {
-    // Movement settings - smoother and slower
+    // Movement settings - responsive and fun
     movement: {
-        acceleration: 8,        // Reduced from 25
-        friction: 0.92,         // Increased friction for smoother stops
-        maxSpeed: 12,           // Cap max speed
-        gravity: 15,            // Slightly reduced gravity
-        jumpForce: 6,           // Reduced jump force
-        smoothing: 0.15         // Lerp factor for smooth movement
+        acceleration: 18,       // Snappy acceleration
+        friction: 0.94,         // Smooth glide on ice
+        maxSpeed: 20,           // Good top speed
+        gravity: 18,
+        jumpForce: 7,
+        smoothing: 0.25         // Responsive controls
     },
     // Collectibles
     totalCollectibles: 16,
     collectRadius: 2.5,
-    // Visual
+    // Visual - optimized for performance
     fogDensity: 0.012,
-    snowflakeCount: 2500
+    snowflakeCount: 1000        // Reduced for performance
 };
 
 // =============================================================================
@@ -43,7 +43,6 @@ const state = {
     collectibles: [],
     skaters: [],
     snowflakes: [],
-    lights: [],
     floatingLights: []
 };
 
@@ -57,11 +56,10 @@ scene.fog = new THREE.FogExp2(0x0a0a1a, CONFIG.fogDensity);
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 2, 35);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.shadowMap.enabled = false;  // Disable shadows for performance
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 document.getElementById('game-container').appendChild(renderer.domElement);
@@ -87,29 +85,20 @@ controls.addEventListener('unlock', () => {
 // LIGHTING SETUP - Enhanced for magical feel
 // =============================================================================
 function setupLighting() {
-    // Ambient - soft blue night
-    const ambientLight = new THREE.AmbientLight(0x2a2a4a, 0.5);
+    // Ambient - soft blue night (increased for no shadows)
+    const ambientLight = new THREE.AmbientLight(0x4a4a6a, 0.7);
     scene.add(ambientLight);
 
-    // Moon light - soft directional
-    const moonLight = new THREE.DirectionalLight(0x8888cc, 0.4);
+    // Moon light - soft directional (no shadows for performance)
+    const moonLight = new THREE.DirectionalLight(0x8888cc, 0.5);
     moonLight.position.set(-50, 80, -50);
-    moonLight.castShadow = true;
-    moonLight.shadow.mapSize.width = 2048;
-    moonLight.shadow.mapSize.height = 2048;
-    moonLight.shadow.camera.near = 0.5;
-    moonLight.shadow.camera.far = 300;
-    moonLight.shadow.camera.left = -100;
-    moonLight.shadow.camera.right = 100;
-    moonLight.shadow.camera.top = 100;
-    moonLight.shadow.camera.bottom = -100;
     scene.add(moonLight);
 
     // Hemisphere light for sky/ground color variation
-    const hemiLight = new THREE.HemisphereLight(0x4466aa, 0x222244, 0.3);
+    const hemiLight = new THREE.HemisphereLight(0x4466aa, 0x222244, 0.4);
     scene.add(hemiLight);
 
-    // Add magical floating lights throughout the scene
+    // Add magical floating lights (reduced count)
     createFloatingLights();
 }
 
@@ -153,31 +142,27 @@ const materials = {
 function createFloatingLights() {
     const colors = [0xff6b9d, 0x6bffb8, 0xffef6b, 0x6bb8ff, 0xb86bff];
     const positions = [
-        // Scattered throughout the scene
+        // Reduced to 8 lights for performance
         [-20, 8, 15], [20, 10, -15], [-40, 6, -20], [40, 9, 25],
-        [-10, 12, -30], [15, 7, 30], [-35, 11, 10], [35, 8, -10],
-        [0, 15, 0], [-25, 9, -35], [25, 11, 35], [-50, 7, 5],
-        [50, 10, -5], [-15, 13, 20], [15, 8, -25], [0, 6, 40]
+        [0, 15, 0], [-25, 9, -35], [25, 11, 35], [0, 6, 40]
     ];
 
     positions.forEach((pos, i) => {
         const lightGroup = new THREE.Group();
         const color = colors[i % colors.length];
 
-        // Glowing orb
-        const orbGeo = new THREE.SphereGeometry(0.2, 16, 16);
-        const orbMat = new THREE.MeshStandardMaterial({
+        // Glowing orb - reduced geometry
+        const orbGeo = new THREE.SphereGeometry(0.25, 8, 8);
+        const orbMat = new THREE.MeshBasicMaterial({
             color: color,
-            emissive: color,
-            emissiveIntensity: 1.5,
             transparent: true,
             opacity: 0.9
         });
         const orb = new THREE.Mesh(orbGeo, orbMat);
         lightGroup.add(orb);
 
-        // Point light
-        const pointLight = new THREE.PointLight(color, 0.8, 15);
+        // Point light - reduced range
+        const pointLight = new THREE.PointLight(color, 0.6, 10);
         lightGroup.add(pointLight);
 
         lightGroup.position.set(...pos);
@@ -197,19 +182,18 @@ function createFloatingLights() {
 // GROUND
 // =============================================================================
 function createGround() {
-    const groundGeometry = new THREE.PlaneGeometry(200, 200, 50, 50);
+    const groundGeometry = new THREE.PlaneGeometry(200, 200);
     const ground = new THREE.Mesh(groundGeometry, materials.snow);
     ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
     scene.add(ground);
 
-    // Snow mounds - reduced count for performance
-    const bumpCount = 300;
-    const bumpGeo = new THREE.SphereGeometry(1, 6, 6);
+    // Snow mounds - minimal for performance
+    const bumpCount = 80;
+    const bumpGeo = new THREE.SphereGeometry(1, 4, 4);
 
     for (let i = 0; i < bumpCount; i++) {
         const bump = new THREE.Mesh(bumpGeo, materials.snow);
-        const size = Math.random() * 0.4 + 0.1;
+        const size = Math.random() * 0.5 + 0.2;
         bump.scale.set(size, size * 0.3, size);
         bump.position.set(
             (Math.random() - 0.5) * 180,
@@ -247,7 +231,7 @@ function createBryantPark() {
         const borderGeo = new THREE.BoxGeometry(...b.scale);
         const border = new THREE.Mesh(borderGeo, borderMaterial);
         border.position.set(...b.pos);
-        border.castShadow = true;
+        border
         parkGroup.add(border);
     });
 
@@ -272,7 +256,7 @@ function createBryantPark() {
     createSign(parkGroup, 'BRYANT PARK', 15, 3, 0);
 
     scene.add(parkGroup);
-    createSkaters(parkGroup.position, 8);
+    createSkaters(parkGroup.position, 5);
 }
 
 function createWarmingHut(parent) {
@@ -284,7 +268,7 @@ function createWarmingHut(parent) {
         new THREE.MeshStandardMaterial({ color: 0x3a2718, roughness: 0.8 })
     );
     hutBase.position.y = 2;
-    hutBase.castShadow = true;
+    hutBase
     hutGroup.add(hutBase);
 
     // Roof with snow
@@ -326,7 +310,7 @@ function createRockefellerCenter() {
     const buildingGeo = new THREE.BoxGeometry(20, 50, 15);
     const building = new THREE.Mesh(buildingGeo, materials.building);
     building.position.y = 25;
-    building.castShadow = true;
+    building
     rockyGroup.add(building);
 
     // Building windows
@@ -359,7 +343,7 @@ function createRockefellerCenter() {
         const sideBuildingGeo = new THREE.BoxGeometry(8, 30, 12);
         const sideBuilding = new THREE.Mesh(sideBuildingGeo, materials.building);
         sideBuilding.position.set(...pos);
-        sideBuilding.castShadow = true;
+        sideBuilding
         rockyGroup.add(sideBuilding);
     });
 
@@ -376,7 +360,7 @@ function createRockefellerCenter() {
     createSign(rockyGroup, 'ROCKEFELLER CENTER', 0, 3, 40);
 
     scene.add(rockyGroup);
-    createSkaters(new THREE.Vector3(30, 0, 0), 6);
+    createSkaters(new THREE.Vector3(30, 0, 0), 4);
 }
 
 function createBuildingWindows(parent, rows, cols, offsetX, height, depth) {
@@ -461,7 +445,7 @@ function createGiantChristmasTree() {
         const coneGeo = new THREE.ConeGeometry(layer.radius, layer.height, 16);
         const cone = new THREE.Mesh(coneGeo, treeMat);
         cone.position.y = layer.y;
-        cone.castShadow = true;
+        cone
         treeGroup.add(cone);
     });
 
@@ -470,9 +454,9 @@ function createGiantChristmasTree() {
     starGroup.position.y = 28;
     treeGroup.add(starGroup);
 
-    // Christmas lights on tree
-    const lightColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xff6600];
-    const lightsPerLayer = 25;
+    // Christmas lights on tree - reduced for performance
+    const lightColors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
+    const lightsPerLayer = 12;
 
     layers.forEach((layer) => {
         for (let i = 0; i < lightsPerLayer; i++) {
@@ -480,48 +464,37 @@ function createGiantChristmasTree() {
             const radius = layer.radius * 0.85;
             const heightOffset = (Math.random() - 0.5) * layer.height * 0.6;
 
-            const lightGeo = new THREE.SphereGeometry(0.15, 8, 8);
+            const lightGeo = new THREE.SphereGeometry(0.18, 6, 6);
             const color = lightColors[Math.floor(Math.random() * lightColors.length)];
-            const lightMat = new THREE.MeshStandardMaterial({
-                color: color,
-                emissive: color,
-                emissiveIntensity: 1.0
-            });
+            const lightMat = new THREE.MeshBasicMaterial({ color: color });
             const lightBulb = new THREE.Mesh(lightGeo, lightMat);
             lightBulb.position.set(
                 Math.sin(angle) * radius,
                 layer.y + heightOffset - layer.height / 4,
                 Math.cos(angle) * radius
             );
-            lightBulb.userData = {
-                baseEmissive: 1.0,
-                phase: Math.random() * Math.PI * 2
-            };
-            state.lights.push(lightBulb);
             treeGroup.add(lightBulb);
-
-            // Add actual point lights for some bulbs
-            if (i % 5 === 0) {
-                const pointLight = new THREE.PointLight(color, 0.3, 4);
-                pointLight.position.copy(lightBulb.position);
-                treeGroup.add(pointLight);
-            }
         }
     });
 
-    // Ornaments
-    const ornamentColors = [0xff0000, 0xffd700, 0x4169e1, 0x9400d3, 0x00ff88];
-    for (let i = 0; i < 35; i++) {
+    // One point light for the whole tree
+    const treeLight = new THREE.PointLight(0xffffff, 1, 20);
+    treeLight.position.set(0, 15, 0);
+    treeGroup.add(treeLight);
+
+    // Ornaments - reduced
+    const ornamentColors = [0xff0000, 0xffd700, 0x4169e1, 0x9400d3];
+    for (let i = 0; i < 20; i++) {
         const layerIndex = Math.floor(Math.random() * layers.length);
         const layer = layers[layerIndex];
         const angle = Math.random() * Math.PI * 2;
         const radius = layer.radius * 0.7 * Math.random();
 
-        const ornamentGeo = new THREE.SphereGeometry(0.25 + Math.random() * 0.15, 16, 16);
+        const ornamentGeo = new THREE.SphereGeometry(0.3, 8, 8);
         const ornamentMat = new THREE.MeshStandardMaterial({
             color: ornamentColors[Math.floor(Math.random() * ornamentColors.length)],
-            roughness: 0.2,
-            metalness: 0.8
+            roughness: 0.3,
+            metalness: 0.7
         });
         const ornament = new THREE.Mesh(ornamentGeo, ornamentMat);
         ornament.position.set(
@@ -582,38 +555,31 @@ function createChristmasTree(height = 3) {
     for (let i = 0; i < 3; i++) {
         const radius = (3 - i) * 0.4 * (height / 3);
         const coneHeight = height / 3;
-        const coneGeo = new THREE.ConeGeometry(radius, coneHeight, 8);
+        const coneGeo = new THREE.ConeGeometry(radius, coneHeight, 6);
         const cone = new THREE.Mesh(coneGeo, treeMat);
         cone.position.y = 0.5 + i * coneHeight * 0.7 + coneHeight / 2;
-        cone.castShadow = true;
         treeGroup.add(cone);
     }
 
-    // Lights
-    const lightColors = [0xff0000, 0x00ff00, 0xffff00, 0x0000ff, 0xff00ff];
-    for (let i = 0; i < 10; i++) {
-        const angle = (i / 10) * Math.PI * 2;
-        const lightGeo = new THREE.SphereGeometry(0.08, 8, 8);
+    // Lights - simplified
+    const lightColors = [0xff0000, 0x00ff00, 0xffff00, 0x0000ff];
+    for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2;
+        const lightGeo = new THREE.SphereGeometry(0.1, 4, 4);
         const color = lightColors[i % lightColors.length];
-        const lightMat = new THREE.MeshStandardMaterial({
-            color: color,
-            emissive: color,
-            emissiveIntensity: 0.8
-        });
+        const lightMat = new THREE.MeshBasicMaterial({ color: color });
         const lightBulb = new THREE.Mesh(lightGeo, lightMat);
         lightBulb.position.set(
             Math.sin(angle) * 0.5,
-            0.8 + Math.random() * height * 0.6,
+            0.8 + Math.random() * height * 0.5,
             Math.cos(angle) * 0.5
         );
-        lightBulb.userData = { baseEmissive: 0.8, phase: i * 0.7 };
-        state.lights.push(lightBulb);
         treeGroup.add(lightBulb);
     }
 
     // Snow cap
     const snowCap = new THREE.Mesh(
-        new THREE.SphereGeometry(0.15, 8, 8),
+        new THREE.SphereGeometry(0.15, 6, 6),
         materials.snow
     );
     snowCap.position.y = height + 0.3;
@@ -671,11 +637,6 @@ function createAngel() {
     trumpet.rotation.z = -Math.PI / 4;
     angelGroup.add(trumpet);
 
-    // Angel glow
-    const angelLight = new THREE.PointLight(0xffd700, 0.4, 6);
-    angelLight.position.y = 3;
-    angelGroup.add(angelLight);
-
     return angelGroup;
 }
 
@@ -699,30 +660,22 @@ function createStringLights(parent, halfWidth, halfDepth, count) {
     const wire = new THREE.Line(wireGeo, wireMat);
     parent.add(wire);
 
-    // Bulbs
+    // Bulbs - simplified, no point lights
     positions.forEach((pos, i) => {
-        if (i % 2 === 0) {
-            const bulbGeo = new THREE.SphereGeometry(0.12, 8, 8);
+        if (i % 3 === 0) {
+            const bulbGeo = new THREE.SphereGeometry(0.15, 6, 6);
             const color = lightColors[i % lightColors.length];
-            const bulbMat = new THREE.MeshStandardMaterial({
-                color: color,
-                emissive: color,
-                emissiveIntensity: 0.9
-            });
+            const bulbMat = new THREE.MeshBasicMaterial({ color: color });
             const bulb = new THREE.Mesh(bulbGeo, bulbMat);
             bulb.position.copy(pos);
-            bulb.userData = { baseEmissive: 0.9, phase: i * 0.4 };
-            state.lights.push(bulb);
             parent.add(bulb);
-
-            // Point lights for some bulbs
-            if (i % 3 === 0) {
-                const pointLight = new THREE.PointLight(color, 0.4, 6);
-                pointLight.position.copy(pos);
-                parent.add(pointLight);
-            }
         }
     });
+
+    // Single point light for the whole string
+    const stringLight = new THREE.PointLight(0xffaa66, 0.5, 15);
+    stringLight.position.set(0, 3.5, 0);
+    parent.add(stringLight);
 }
 
 // =============================================================================
@@ -778,7 +731,7 @@ function createSkyline() {
         const buildingGeo = new THREE.BoxGeometry(config.w, config.h, config.d);
         const building = new THREE.Mesh(buildingGeo, materials.building);
         building.position.set(config.x, config.h / 2, config.z);
-        building.castShadow = true;
+        building
         scene.add(building);
 
         // Windows
@@ -1371,18 +1324,17 @@ function animate() {
         light.position.z += Math.cos(elapsedTime * 0.3 + data.phase) * 0.005;
     });
 
-    // Update snowfall
+    // Update snowfall - simplified for performance
     state.snowflakes.forEach(snowfall => {
         const positions = snowfall.geometry.attributes.position.array;
         const velocities = snowfall.userData.velocities;
+        const len = positions.length / 3;
 
-        for (let i = 0; i < positions.length / 3; i++) {
-            positions[i * 3] += velocities[i].x + Math.sin(elapsedTime * 0.5 + i * 0.1) * 0.002;
+        for (let i = 0; i < len; i++) {
             positions[i * 3 + 1] -= velocities[i].y;
-            positions[i * 3 + 2] += velocities[i].z;
 
             if (positions[i * 3 + 1] < 0) {
-                positions[i * 3 + 1] = 80 + Math.random() * 20;
+                positions[i * 3 + 1] = 80;
                 positions[i * 3] = (Math.random() - 0.5) * 200;
                 positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
             }
@@ -1411,14 +1363,6 @@ function animate() {
                     triggerWinScene();
                 }
             }
-        }
-    });
-
-    // Twinkle lights
-    state.lights.forEach(light => {
-        if (light.userData && light.material) {
-            const twinkle = Math.sin(elapsedTime * 4 + light.userData.phase) * 0.4 + 0.6;
-            light.material.emissiveIntensity = light.userData.baseEmissive * twinkle;
         }
     });
 
