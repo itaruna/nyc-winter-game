@@ -769,6 +769,148 @@ function createSkyline() {
 }
 
 // =============================================================================
+// OFFICE BUILDINGS - 151 W 42nd St & 1 Penn Plaza
+// =============================================================================
+function createOfficeBuildings() {
+    // 151 W 42nd St (near Bryant Park / Times Square area)
+    create151W42nd();
+
+    // 1 Pennsylvania Plaza (near Penn Station)
+    create1PennPlaza();
+}
+
+function create151W42nd() {
+    const buildingGroup = new THREE.Group();
+    buildingGroup.position.set(-55, 0, 20);
+
+    // Main tower - modern glass building
+    const towerGeo = new THREE.BoxGeometry(14, 45, 12);
+    const towerMat = new THREE.MeshStandardMaterial({
+        color: 0x334455,
+        roughness: 0.3,
+        metalness: 0.6
+    });
+    const tower = new THREE.Mesh(towerGeo, towerMat);
+    tower.position.y = 22.5;
+    buildingGroup.add(tower);
+
+    // Glass curtain wall effect - windows
+    for (let row = 0; row < 12; row++) {
+        for (let col = 0; col < 5; col++) {
+            const windowGeo = new THREE.PlaneGeometry(2, 3);
+            const windowMat = new THREE.MeshStandardMaterial({
+                color: 0x88ccff,
+                emissive: 0x4488aa,
+                emissiveIntensity: Math.random() * 0.4 + 0.3,
+                transparent: true,
+                opacity: 0.9
+            });
+            const windowMesh = new THREE.Mesh(windowGeo, windowMat);
+            windowMesh.position.set(
+                (col - 2) * 2.5,
+                row * 3.5 + 4,
+                6.01
+            );
+            buildingGroup.add(windowMesh);
+        }
+    }
+
+    // Snow on roof
+    const snowRoof = new THREE.Mesh(
+        new THREE.BoxGeometry(14.5, 0.3, 12.5),
+        materials.snow
+    );
+    snowRoof.position.y = 45.15;
+    buildingGroup.add(snowRoof);
+
+    // Building sign
+    createBuildingSign(buildingGroup, '151 W 42ND ST', 0, 8, 6.1);
+
+    scene.add(buildingGroup);
+}
+
+function create1PennPlaza() {
+    const buildingGroup = new THREE.Group();
+    buildingGroup.position.set(65, 0, 30);
+
+    // Main tower - tall rectangular tower
+    const towerGeo = new THREE.BoxGeometry(16, 55, 14);
+    const towerMat = new THREE.MeshStandardMaterial({
+        color: 0x2a3a4a,
+        roughness: 0.5,
+        metalness: 0.4
+    });
+    const tower = new THREE.Mesh(towerGeo, towerMat);
+    tower.position.y = 27.5;
+    buildingGroup.add(tower);
+
+    // Windows in a grid pattern
+    for (let row = 0; row < 14; row++) {
+        for (let col = 0; col < 6; col++) {
+            if (Math.random() > 0.25) {
+                const windowGeo = new THREE.PlaneGeometry(1.8, 2.5);
+                const windowMat = new THREE.MeshStandardMaterial({
+                    color: 0xffffdd,
+                    emissive: 0xffeeaa,
+                    emissiveIntensity: Math.random() * 0.5 + 0.2
+                });
+                const windowMesh = new THREE.Mesh(windowGeo, windowMat);
+                windowMesh.position.set(
+                    (col - 2.5) * 2.4,
+                    row * 3.5 + 5,
+                    7.01
+                );
+                buildingGroup.add(windowMesh);
+            }
+        }
+    }
+
+    // Snow on roof
+    const snowRoof = new THREE.Mesh(
+        new THREE.BoxGeometry(16.5, 0.3, 14.5),
+        materials.snow
+    );
+    snowRoof.position.y = 55.15;
+    buildingGroup.add(snowRoof);
+
+    // Building sign
+    createBuildingSign(buildingGroup, '1 PENN PLAZA', 0, 10, 7.1);
+
+    scene.add(buildingGroup);
+}
+
+function createBuildingSign(parent, text, x, y, z) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#1a1a2a';
+    ctx.fillRect(0, 0, 256, 64);
+
+    ctx.strokeStyle = '#888888';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(4, 4, 248, 56);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 20px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 32);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const signGeo = new THREE.PlaneGeometry(6, 1.5);
+    const signMat = new THREE.MeshStandardMaterial({
+        map: texture,
+        emissive: 0xffffff,
+        emissiveIntensity: 0.1
+    });
+    const sign = new THREE.Mesh(signGeo, signMat);
+    sign.position.set(x, y, z);
+    parent.add(sign);
+}
+
+// =============================================================================
 // STREET LAMPS
 // =============================================================================
 function createStreetLamps() {
@@ -911,8 +1053,8 @@ function generateRandomPosition() {
         { xMin: -45, xMax: -15, zMin: -15, zMax: 15 },   // Bryant Park area
         { xMin: 15, xMax: 50, zMin: -10, zMax: 35 },     // Rockefeller area
         { xMin: -15, xMax: 15, zMin: -20, zMax: 30 },    // Center area
-        { xMin: -60, xMax: -30, zMin: 15, zMax: 40 },    // West side
-        { xMin: 30, xMax: 60, zMin: -30, zMax: -5 },     // East side
+        { xMin: -65, xMax: -45, zMin: 10, zMax: 35 },    // 151 W 42nd St area
+        { xMin: 55, xMax: 75, zMin: 20, zMax: 45 },      // 1 Penn Plaza area
     ];
 
     const zone = zones[Math.floor(Math.random() * zones.length)];
@@ -1178,6 +1320,10 @@ function checkLocation() {
         location = 'BRYANT PARK';
     } else if (pos.x > 15 && pos.x < 55 && pos.z > -45 && pos.z < 40) {
         location = 'ROCKEFELLER CENTER';
+    } else if (pos.x < -45 && pos.x > -70 && pos.z > 10 && pos.z < 35) {
+        location = '151 W 42ND ST';
+    } else if (pos.x > 55 && pos.x < 80 && pos.z > 20 && pos.z < 45) {
+        location = '1 PENN PLAZA';
     }
 
     if (location !== state.currentLocation) {
@@ -1467,6 +1613,7 @@ function init() {
     createBryantPark();
     createRockefellerCenter();
     createSkyline();
+    createOfficeBuildings();
     createStreetLamps();
     createSnowfall();
     createCollectibles();
