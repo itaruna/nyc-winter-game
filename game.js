@@ -14,9 +14,10 @@ const CONFIG = {
         jumpForce: 7,
         smoothing: 0.25         // Responsive controls
     },
-    // Collectibles
-    totalCollectibles: 16,
+    // Collectibles - named ornaments
+    totalCollectibles: 12,
     collectRadius: 2.5,
+    ornamentNames: ['Nick', 'Dhiya', 'Jack', 'Janen', 'Kathleen', 'Katie', 'Lauren', 'Max', 'Noelle', 'Ritvik', 'Athena', 'Sam'],
     // Visual - optimized for performance
     fogDensity: 0.012,
     snowflakeCount: 1000        // Reduced for performance
@@ -904,42 +905,113 @@ function createSkaters(rinkCenter, count) {
 // =============================================================================
 // COLLECTIBLES
 // =============================================================================
-function createCollectibles() {
-    const collectiblePositions = [
-        // Around Bryant Park
-        [-25, 1.5, 5], [-35, 1.5, -5], [-30, 1.5, 10], [-20, 1.5, -8],
-        // Around Rockefeller
-        [25, 1.5, 15], [35, 1.5, 5], [30, 1.5, 25], [40, 1.5, 10],
-        // Between locations
-        [0, 1.5, 10], [0, 1.5, -10], [-10, 1.5, 0], [10, 1.5, 0],
-        // Further out
-        [-50, 1.5, 25], [50, 1.5, -15], [-20, 1.5, 35], [20, 1.5, -30]
+function generateRandomPosition() {
+    // Define spawn zones to keep ornaments in interesting areas
+    const zones = [
+        { xMin: -45, xMax: -15, zMin: -15, zMax: 15 },   // Bryant Park area
+        { xMin: 15, xMax: 50, zMin: -10, zMax: 35 },     // Rockefeller area
+        { xMin: -15, xMax: 15, zMin: -20, zMax: 30 },    // Center area
+        { xMin: -60, xMax: -30, zMin: 15, zMax: 40 },    // West side
+        { xMin: 30, xMax: 60, zMin: -30, zMax: -5 },     // East side
     ];
 
-    collectiblePositions.forEach((pos, i) => {
-        const ornamentGroup = new THREE.Group();
+    const zone = zones[Math.floor(Math.random() * zones.length)];
+    const x = zone.xMin + Math.random() * (zone.xMax - zone.xMin);
+    const z = zone.zMin + Math.random() * (zone.zMax - zone.zMin);
 
-        // Main sphere
-        const sphereGeo = new THREE.SphereGeometry(0.4, 16, 16);
-        const sphere = new THREE.Mesh(sphereGeo, materials.gold);
+    return [x, 1.5, z];
+}
+
+function createNameLabel(name) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+    ctx.roundRect(4, 4, 120, 56, 8);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffd700';
+    ctx.font = 'bold 24px Georgia';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(name, 64, 32);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(spriteMat);
+    sprite.scale.set(2, 1, 1);
+    sprite.position.y = 1.2;
+
+    return sprite;
+}
+
+function createCollectibles() {
+    const names = [...CONFIG.ornamentNames];
+    const ornamentColors = [0xff0000, 0x00aa00, 0x0066ff, 0xff00ff, 0x00cccc, 0xffaa00];
+
+    // Generate random positions ensuring minimum distance between ornaments
+    const positions = [];
+    const minDistance = 12;
+
+    for (let i = 0; i < CONFIG.totalCollectibles; i++) {
+        let pos;
+        let attempts = 0;
+
+        do {
+            pos = generateRandomPosition();
+            attempts++;
+        } while (
+            attempts < 50 &&
+            positions.some(p => {
+                const dx = p[0] - pos[0];
+                const dz = p[2] - pos[2];
+                return Math.sqrt(dx * dx + dz * dz) < minDistance;
+            })
+        );
+
+        positions.push(pos);
+    }
+
+    positions.forEach((pos, i) => {
+        const ornamentGroup = new THREE.Group();
+        const name = names[i];
+        const color = ornamentColors[i % ornamentColors.length];
+
+        // Main sphere with unique color
+        const sphereGeo = new THREE.SphereGeometry(0.45, 12, 12);
+        const sphereMat = new THREE.MeshStandardMaterial({
+            color: color,
+            roughness: 0.2,
+            metalness: 0.8,
+            emissive: color,
+            emissiveIntensity: 0.3
+        });
+        const sphere = new THREE.Mesh(sphereGeo, sphereMat);
         ornamentGroup.add(sphere);
 
         // Cap
         const capGeo = new THREE.CylinderGeometry(0.1, 0.15, 0.15, 8);
         const capMat = new THREE.MeshStandardMaterial({ color: 0xc0c0c0, metalness: 0.8 });
         const cap = new THREE.Mesh(capGeo, capMat);
-        cap.position.y = 0.45;
+        cap.position.y = 0.5;
         ornamentGroup.add(cap);
 
+        // Name label
+        const label = createNameLabel(name);
+        ornamentGroup.add(label);
+
         // Glow
-        const glowLight = new THREE.PointLight(0xffd700, 0.6, 6);
+        const glowLight = new THREE.PointLight(color, 0.5, 6);
         ornamentGroup.add(glowLight);
 
         ornamentGroup.position.set(...pos);
         ornamentGroup.userData = {
             collected: false,
             baseY: pos[1],
-            phase: i * 0.5
+            phase: Math.random() * Math.PI * 2,
+            name: name
         };
 
         scene.add(ornamentGroup);
@@ -1354,12 +1426,19 @@ function animate() {
             if (distance < CONFIG.collectRadius) {
                 collectible.userData.collected = true;
                 collectible.visible = false;
-                state.score += 10;
-                document.getElementById('score').textContent = state.score;
+                state.score++;
+                document.getElementById('score').textContent = `${state.score} / ${CONFIG.totalCollectibles}`;
+
+                // Show collected name
+                const indicator = document.getElementById('location-indicator');
+                indicator.textContent = `Found ${collectible.userData.name}!`;
+                indicator.style.opacity = '1';
+                setTimeout(() => {
+                    if (!state.gameWon) indicator.style.opacity = '0';
+                }, 2000);
 
                 // Check win condition
-                const collected = state.collectibles.filter(c => c.userData.collected).length;
-                if (collected >= state.totalCollectibles) {
+                if (state.score >= CONFIG.totalCollectibles) {
                     triggerWinScene();
                 }
             }
@@ -1396,7 +1475,7 @@ function init() {
     setupInputHandlers();
 
     // Update UI with total collectibles
-    document.getElementById('score').textContent = '0';
+    document.getElementById('score').textContent = `0 / ${CONFIG.totalCollectibles}`;
 
     // Hide loading
     document.getElementById('loading').style.display = 'none';
